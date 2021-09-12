@@ -1,0 +1,146 @@
+---
+title: "Inspecting gene expression in platelet cells from PBMC dataset"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+setwd("C:/Users/HP/Desktop/sem 8/project/covid/code2")
+
+pbmc.dat = Read10X(data.dir = "./filtered_feature_bc_matrix/")
+pbmc.ch3 <- CreateSeuratObject(counts = pbmc3.dat, min.cells = 10, min.features = 200)
+
+```
+
+
+```{r}
+pbmc.ch3[["percent.mt"]] <- PercentageFeatureSet(object = pbmc.ch3, pattern = "^MT-")
+VlnPlot(object = pbmc.ch3, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3,pt.size = 0.01)
+
+```
+
+
+```{r}
+count_v_plot = function(pbmc){
+plot1 <- FeatureScatter(object = pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(object = pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+}
+
+count_v_plot(pbmc.ch3)
+
+```
+
+
+```{r}
+par(mfrow=c(2,1))
+ plot(density(pbmc.ch3@meta.data$nCount_RNA,bw = 50),xlab="RNA_molecules",main="PBMC")
+ plot(density(pbmc.ch3@meta.data$nFeature_RNA,bw = 20),xlab="Genes_detected",main="PBMC")
+
+
+```
+
+
+```{r}
+
+pbmc.ch3 <- subset(x = pbmc.ch3, subset = nFeature_RNA > quantile(pbmc.ch3@meta.data$nFeature_RNA,probs=0.05) & nFeature_RNA < quantile(pbmc.ch3@meta.data$nFeature_RNA,probs=0.95) & percent.mt < quantile(pbmc.ch3@meta.data$percent.mt,probs=0.95))
+
+pbmc.ch3 <- NormalizeData(object = pbmc.ch3, normalization.method = "LogNormalize", scale.factor = 1000)
+
+```
+
+
+```{r}
+pbmc.ch3 <- FindVariableFeatures(object = pbmc.ch3, selection.method = "vst", nfeatures = 1500)
+
+LabelPoints(plot = VariableFeaturePlot(object = pbmc.ch3,cols = c("gray","indianred")), points = head(x = VariableFeatures(object = pbmc.ch3), 10), repel = TRUE, xnudge = 0, ynudge = 0)
+
+all.genes <- rownames(x = pbmc.ch3)
+pbmc.ch3 <- ScaleData(object = pbmc.ch3, features = all.genes)
+
+pbmc.ch3 <- RunPCA(object = pbmc.ch3, features = VariableFeatures(object = pbmc.ch3),verbose = F,nfeatures.print = F,ndims.print = F)
+```
+
+
+```{r}
+pbmc.ch3 <- JackStraw(object = pbmc.ch3, num.replicate = 100)
+pbmc.ch3 <- ScoreJackStraw(object = pbmc.ch3, dims = 1:20)
+JackStrawPlot(object = pbmc.ch3, dims = 1:20)
+```
+
+
+```{r}
+ElbowPlot(object = pbmc.ch3)
+
+```
+
+
+
+```{r}
+
+pbmc.ch3 <- RunTSNE(object = pbmc.ch3, reduction = "pca", dims = 1:15)
+pbmc.ch3 <- RunUMAP(object = pbmc.ch3, reduction = "pca", dims = 1:15)
+pbmc.ch3 <- FindNeighbors(object = pbmc.ch3, reduction = "pca", dims = 1:15)
+pbmc.ch3 <- FindClusters(pbmc.ch3, resolution = 0.9)
+
+```
+
+
+
+```{r}
+library(cowplot)
+# Visualization
+
+DimPlot(object = pbmc.ch3, reduction = "tsne", label = TRUE)
+DimPlot(object = pbmc.ch3, reduction = "umap", label = TRUE)
+```
+```{r}
+pbmc.markers <- FindAllMarkers(pbmc.ch3, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+
+
+```{r}
+
+marker.genes = c("IL7R","CCR7","S100A4","CD14","LYZ","MS4A1","CD8A","FCGR3A","MS4A7","GNLY","NKG7","FCER1A","CST3","PPBP")
+
+for (x in marker.genes)
+{
+  print(FeaturePlot(object = pbmc.ch3, features = x, cols = c("gray","orange","red")))
+}
+
+
+```
+
+
+```{r}
+library(clustree)
+
+label_species <- function(labels) {
+    x = paste(round(table(labels)[1]/length(labels), digits=2),round(table(labels)[2]/length(labels), digits = 2),sep = " | ")
+    return(x)
+}
+
+label_species_2 <- function(labels) {
+    x = paste(table(labels)[1],table(labels)[2],sep = " | ")
+    return(x)
+}
+
+dev.new(width = 200, height = 1000, unit = "px")
+clustree(combined,prefix = "integrated_snn_res.",node_label="dataset",node_label_aggr="label_species" )
+
+clustree(combined, prefix="integrated_snn_res.")
+clustree(pbmc.ch1, prefix="RNA_snn_res.")
+clustree(pbmc.ch2, prefix="RNA_snn_res.")
+
+```
+
+
+```{r}
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

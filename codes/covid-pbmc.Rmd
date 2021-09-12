@@ -1,0 +1,523 @@
+---
+title: "Plasmodium single cell"
+output: html_notebook
+---
+
+# MAKE SURE TO RUN THIS TO CREATE NEW DIRECTORY EVERY TIME YOU RUN THE SCRIPT
+
+```{r}
+target.dir = "C:/Users/HP/Desktop/sem 8/project/IG/plasmodium/"
+ss = strsplit(date()," ")[[1]]
+newDirName = paste(ss[3],ss[2],ss[5],sep="_")
+new.dir = paste0(target.dir,newDirName)
+dir.create(new.dir)
+setwd(new.dir)
+```
+
+
+```{r,echo=T,include=T}
+library(Seurat)
+
+dat = Read10X(data.dir = "C:/Users/HP/Desktop/sem 8/project/IG/filtered_gene_bc_matrices/hg19")
+
+sobj.c <- CreateSeuratObject(counts = dat, project = "covid-pbmc", min.cells = 3, min.features = 100)
+
+```
+
+```{r,echo=T,include=T}
+
+sobj.c[["percent.mt"]] <- PercentageFeatureSet(object = sobj.c, pattern = "^MT-")
+
+VlnPlot(object = sobj.c, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3,pt.size = 0.01)
+
+```
+
+```{r,echo=T,include=T,warning=F,out.width=15}
+count_v_plot = function(pbmc){
+plot1 <- FeatureScatter(object = pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(object = pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+CombinePlots(plots = list(plot1, plot2))
+}
+
+count_v_plot(sobj.c)
+
+```
+
+
+```{r,echo=T,include=T}
+
+par(mfrow=c(1,2))
+ plot(density(sobj.c@meta.data$nCount_RNA,bw = 50),xlab="RNA_molecules",main="Control")
+
+ plot(density(sobj.c@meta.data$nFeature_RNA,bw = 20),xlab="Genes_detected",main="Control")
+
+```
+
+
+We use the above plots to determine the cut-off value for lower and higher threshold of genes expressed per cell to remove duplicates and background cells. This can be changes if it is expected that these values are unreasonable for Plasmodium. We also remove cells which have very high mitochondrial gene expression which is suggestive of cell death during the course of handling. 
+
+
+```{r,echo=T,include=T,message=F}
+# sobj.c <- subset(x = sobj.c, subset = nFeature_RNA > quantile(sobj.c@meta.data$nFeature_RNA,probs=0.05) & nFeature_RNA < quantile(sobj.c@meta.data$nFeature_RNA,probs=0.95) & percent.mt < quantile(sobj.c@meta.data$percent.mt,probs=0.95))
+
+sobj.c <- NormalizeData(object = sobj.c, normalization.method = "LogNormalize", scale.factor = 1000)
+
+```
+
+In order to analyze single cell datasets it is imperative to identify genes that are highly variable across all the cells. These are the genes which give individual cells there defining characteristics. This is done by performing Variance stabilizing transformation or VST to calculate the standardized variance per gene across all the cells. Then PCA is calculated for each sample.  
+
+```{r,echo=T,include=T}
+sobj.c <- FindVariableFeatures(object = sobj.c, selection.method = "vst", nfeatures = 1000)
+
+LabelPoints(plot = VariableFeaturePlot(object = sobj.c,cols = c("gray","indianred")), points = head(x = VariableFeatures(object = sobj.c), 10), repel = TRUE, xnudge = 0, ynudge = 0)
+
+all.genes <- rownames(x = sobj.c)
+sobj.c <- ScaleData(object = sobj.c, features = all.genes)
+
+sobj.c<- RunPCA(object = sobj.c, features = VariableFeatures(object = sobj.c),verbose = F,nfeatures.print = F,ndims.print = F )
+
+```
+
+QQ-plot of variation explained by individual PCs per gene suggests that most of significant deviation in variation beyond chance is explained by  PC10 in control samples and PC12 in treated samples 
+
+```{r,echo=T,include=T}
+sobj.c <- JackStraw(object = sobj.c, num.replicate = 100)
+sobj.c <- ScoreJackStraw(object = sobj.c, dims = 1:20)
+JackStrawPlot(object = sobj.c, dims = 1:20)
+
+
+```
+
+
+Elbow plots of 20 Principal components (PC)  for the control and the treated samples shows that the % variation explained per PC flatlines by PC10, therefore we would use 10 PCs for downstream applications such as cell clustering.
+
+```{r,echo=T,include=T}
+ElbowPlot(object = sobj.c)
+
+```
+
+
+
+# Combined analysis
+
+Now we combine the two single cell datasets to explore the which cell clusters are common between the control and the treatment samples and if there are new clusters that are present in only one of the samples.
+
+```{r,echo=T,include=T}
+
+# Run the standard workflow for visualization and clustering
+sobj.c <- ScaleData(object = sobj.c, verbose = FALSE)
+sobj.c <- RunPCA(object = sobj.c, npcs = 30, verbose = FALSE)
+# t-SNE and Clustering
+
+sobj.c <- RunTSNE(object = sobj.c, reduction = "pca", dims = 1:20)
+sobj.c <- RunUMAP(object = sobj.c, reduction = "pca", dims = 1:20)
+sobj.c <- FindNeighbors(object = sobj.c, reduction = "pca", dims = 1:10)
+sobj.c <- FindClusters(sobj.c, resolution = 0.5)
+  
+```
+
+
+```{r,echo=T,include=T,out.height=5,out.width=14}
+library(cowplot)
+# Visualization
+DimPlot(object = sobj.c, reduction = "umap")
+
+```
+
+
+Cluster 8 is a new cluster emerging in the treatment sample.
+
+Do notice the change in the number of cells between control and treatment, maybe indicative of how the treatment re-wired gene expression and biases the cells to exist in specific states that may be functionally relevant to the treatment. This particularly evident for cluster 0,1 and 4 
+
+```{r,echo=T,include=T}
+
+DimPlot(object = sobj.c, reduction = "tsne", label = TRUE)
+DimPlot(object = sobj.c, reduction = "umap", label = TRUE)
+
+
+```
+
+
+From the plot above and below it is clear that there are different number of cells between control and treated samples in cluster 1, 2, 4, 6. This could suggest that cells due to treatment the cells are re-wiring gene expression to decide which state to be in.
+
+```{r, echo =F}
+combined = sobj.c
+cluster_cell_counts = table(combined@meta.data$seurat_clusters)
+
+barplot(cluster_cell_counts,beside=T,col="indianred", ylab="(% of total cells)/cluster",xlab="Cluster")
+
+legend("topright",c("pbmc"),fill="indianred")
+```
+
+
+```{r,echo=T,include=T}
+DefaultAssay(object = combined) <- "RNA"
+markers <-do.call(rbind,lapply( 0:7, function(x){
+  df=FindConservedMarkers(object = combined, ident.1 = x, grouping.var = "condition", 
+    verbose = FALSE,only.pos=T)
+  df$cluster = x
+  df$gene = rownames(df)
+  df})
+)
+
+#markers.selected = markers[which(markers$control_pct.1/markers$control_pct.2 >1.5 & markers$control_pct.1 > 0.3 & markers$control_avg_logFC >0.5),]
+
+markers.selected = markers[which(markers$control_pct.1/markers$control_pct.2 >1.25 & markers$control_pct.1 > 0.3 & markers$control_avg_logFC >0.3),]
+
+
+```
+
+Marker genes across different clusters from control and treated samples. We are plotting only the top 2 markers from each cluster such that they are expressed in at least 30% of the cells and have a 50% higher average gene expression than other clusters. 
+
+
+
+```{r,echo=T,include=T}
+gList = do.call(rbind, lapply(split(markers.selected,markers.selected$cluster), function(x) x[1:2,] ) )$gene
+lapply(gList, function(x)
+FeaturePlot(object = combined, features = x, split.by = "condition",cols = c("gray","orange","red"))
+)
+```
+
+
+## Psuedotime analysis
+
+```{r,echo=T,include=T,warnings=F}
+
+library(monocle3)
+
+
+seurat_obj = sobj.c
+
+seurat_cell_data <- as.data.frame(x = seurat_obj@meta.data)
+seurat_genes <- as.data.frame(x = row.names(seurat_obj@assays$RNA@counts))
+colnames(seurat_genes) <- "gene_short_name"
+rownames(seurat_genes) <- seurat_genes$gene_short_name
+
+cds <- new_cell_data_set(seurat_obj@assays$RNA@counts,
+                         cell_metadata = seurat_cell_data,
+                         gene_metadata = seurat_genes
+                          )
+
+cds <- preprocess_cds(cds, num_dim = 100)
+cds <- reduce_dimension(cds)
+cds <- cluster_cells(cds)
+
+cds <- learn_graph(cds)
+```
+
+```{r}
+plot_cells(cds,
+color_cells_by = "cluster",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = T,
+show_trajectory_graph = F,group_label_size = 4)
+```
+
+```{r}
+plot_cells(cds,
+color_cells_by = "partition",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = F,group_label_size = 4)
+```
+
+
+```{r}
+plot_cells(cds,
+color_cells_by = "seurat_clusters",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = T,group_label_size = 4)
+
+```
+
+```{r}
+plot_cells(cds,
+color_cells_by = "condition",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = F,group_label_size = 4)
+```
+
+
+```{r}
+colData(cds)$condition_seurat_cluster = paste( colData(cds)$condition, colData(cds)$seurat_clusters)
+
+
+
+plot_cells(cds,
+color_cells_by = "seurat_clusters",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = F,
+group_label_size = 3,
+graph_label_size = 2)
+
+```
+
+```{r}
+# test
+if(FALSE){
+x=0  
+colData(cds)$colInd = "others"
+targets_index = which(colData(cds)$seurat_clusters==x)
+colData(cds)$colInd[targets_index] = colData(cds)$condition_seurat_cluster[targets_index] 
+
+pt_sizes = rep(0.5, nrow(colData(cds)))
+pt_sizes[targets_index]=2
+
+plot_cells(cds,
+color_cells_by = "colInd",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = F)
+
+# scale_color_manual(values=c( "indianred","#9999990F", "steelblue"))
+}
+
+
+#implementation
+lapply(0:7, function(x){
+  
+colData(cds)$colInd = "others"
+targets_index = which(colData(cds)$seurat_clusters==x)
+colData(cds)$colInd[targets_index] = colData(cds)$condition_seurat_cluster[targets_index] 
+
+#pdf(paste0(new.dir,"/monocle_plots_cluster_condition.pdf"))
+
+plot_cells(cds,
+color_cells_by = "colInd",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = T,cell_size = 1) 
+  # scale_color_manual(values=c( "indianred","#DDDDDD", "steelblue"))
+})
+
+x=8 
+  
+colData(cds)$colInd = "others"
+targets_index = which(colData(cds)$seurat_clusters==x)
+colData(cds)$colInd[targets_index] = colData(cds)$condition_seurat_cluster[targets_index] 
+
+
+plot_cells(cds,
+color_cells_by = "colInd",
+label_groups_by_cluster=T,
+label_leaves=FALSE,
+label_branch_points=FALSE,
+label_cell_groups = F,
+show_trajectory_graph = T,cell_size = 1)
+  # scale_color_manual(values=c( "#DDDDDD","indianred"))
+
+#dev.off()
+```
+
+
+
+
+```{r}
+gametogenesis = read.delim("C:/Users/ishaa/Desktop/gametocytogenesis.txt",header=F)
+
+plot_genes_by_group(cds,
+                    gsub("_","-",gametogenesis$V1),
+                    group_cells_by="seurat_clusters",
+                    ordering_type="maximal_on_diag",
+                    max.size=5)
+
+
+plot_genes_by_group(cds,
+                    gsub("_","-",gametogenesis$V1),
+                    group_cells_by="condition_seurat_cluster",
+                    ordering_type="maximal_on_diag",
+                    max.size=5)
+
+
+```
+
+```{r}
+colData(cds)$partition = partitions(cds)
+condition_cluster_partition=  table(colData(cds)$condition_seurat_cluster,colData(cds)$partition)
+for(x in 1:9) cluster_partition[x,]= cluster_partition[x,]/sum(cluster_partition[x,])
+
+pheatmap::pheatmap(condition_seurat_cluster,display_numbers = T, cluster_rows = F)
+```
+
+
+
+```{r}
+colData(cds)$monocle.cluster = cds@clusters$UMAP$clusters
+
+colData(cds)$monocle.partition = cds@clusters$UMAP$partitions
+
+save(cds, file=paste0(new.dir,"/cds.rda"))
+
+tab.treat.part.orig = table(colData(cds)$stim,colData(cds)$monocle.partition)
+tab.treat.part = tab.treat.part.orig
+for(x in 1:nrow(tab.treat.part))tab.treat.part[x,] =  tab.treat.part[x,]/sum(tab.treat.part[x,])
+pheatmap::pheatmap(tab.treat.part,cluster_rows = F,cluster_cols = F,display_numbers = T)
+
+
+tab.treat.part.orig = table(colData(cds)$treatment,colData(cds)$monocle.partition)
+tab.treat.part = tab.treat.part.orig
+for(x in 1:nrow(tab.treat.part))tab.treat.part[x,] =  tab.treat.part[x,]/sum(tab.treat.part[x,])
+tab.treat.part
+pheatmap::pheatmap(tab.treat.part,cluster_rows = F,cluster_cols = F,display_numbers = T)
+```
+
+
+```{r,echo=T,include=T}
+diff_test_res <- differentialGeneTest(cds.c,
+                                      fullModelFormulaStr = "~sm.ns(Pseudotime)")
+
+
+```
+
+
+```{r, echo=T, include=T}
+plot_genes_in_pseudotime(cds.c[c("PF3D7-0100300","PF3D7-0832000","PF3D7-0401600"),], color_by = "Clusters")
+
+
+plot_pseudotime_heatmap(cds.c[c("PF3D7-0100300","PF3D7-0832000","PF3D7-0401600"),],
+                num_clusters = 4,
+                cores = 1,
+                show_rownames = T)
+
+```
+
+The trajectory of cells when combining both the experiments is quite stable and looks very similar to the individual trajectories.
+
+
+```{r,echo=T,include=T}
+disp_table <- dispersionTable(cds.c)
+ordering_genes <- subset(disp_table,
+                  mean_expression >= 0.5 &
+                  dispersion_empirical >= 1 * dispersion_fit)$gene_id
+cds.c.high_disp <-setOrderingFilter(cds.c,ordering_genes = unique(ordering_genes) )
+
+cds.c.high_disp <-reduceDimension(cds.c.high_disp, method = 'DDRTree')
+
+cds.c <-orderCells(cds.c.high_disp)
+plot_cell_trajectory(cds.c.high_disp, color_by = "Clusters")
+
+
+```
+
+We can see below no obvious deviations in the trajectories of cells based on their gene expression
+
+```{r,echo=T,include=T}
+cds.combined = seurat2monocle(combined)
+cds.combined <-setOrderingFilter(cds.combined,ordering_genes = unique(markers$gene) )
+cds.combined <-reduceDimension(cds.combined, method = 'DDRTree')
+cds.combined <-orderCells(cds.combined)
+colnames( pData(cds.combined) )[grep("seurat_clusters",colnames(pData(cds.combined)))] = "Clusters"
+```
+
+```{r,echo=T,include=T}
+plot_cell_trajectory(cds.combined, color_by = "condition")
+
+```
+
+
+```{r}
+source("C:/Users/ishaa/Downloads/10x-20190412T065751Z-001/customFunctions.R")
+cl.tj.plot = function(cds.combined, clusterID=2)
+{pData(cds.combined)$target_cluster = "none"
+pData(cds.combined)$target_cluster[pData(cds.combined)$Clusters==clusterID & pData(cds.combined)$condition=="control"] = paste0(clusterID,"_control")
+pData(cds.combined)$target_cluster[pData(cds.combined)$Clusters==clusterID & pData(cds.combined)$condition=="treatment"] = paste0(clusterID,"_treatment")
+
+plot_cell_trajectory(cds.combined, color_by = "target_cluster" )
+}
+
+lapply(c(1,2,4,6,8), function(x) cl.tj.plot(cds.combined,clusterID = x) )
+
+
+```
+
+
+
+```{r,warning=F}
+
+cor.cluster.change.genes = function(
+                             g1 = "AttA",
+                             g2 = "AttB",
+                             cl = 0, col="stim", col_val = "VU",
+                             method = "spearman") {
+  x1 = which(rownames(counts) %in% gene2Fb[g1])
+  x2 = which(rownames(counts) %in% gene2Fb[g2])
+
+    y = which(colnames(counts) %in% rownames(combined.rep2@meta.data)[which(combined.rep2@meta.data$seurat_clusters ==cl & combined.rep2@meta.data[col]==col_val)])
+  
+  cor(counts[x1, y], counts[x2, y], method = method)
+  
+}
+
+combined.rep2@meta.data$isVirgin = FALSE
+combined.rep2@meta.data$isVirgin[grep("V",combined.rep2@meta.data$stim)] = TRUE
+
+combined.rep2@meta.data$isInfected = FALSE
+combined.rep2@meta.data$isInfected[grep("I",combined.rep2@meta.data$stim)] = TRUE
+
+combined.rep2@meta.data$isUninfected = FALSE
+combined.rep2@meta.data$isUninfected[grep("U",combined.rep2@meta.data$stim)] = TRUE
+
+library(pheatmap)
+breaksList = seq(-10, 10, by = 1)/10
+pal = colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(length(breaksList))
+
+gL= c("AttA","AttB","AttC","Dro","CecA2","CycA","CycB","Egfr","Yp1","Yp2","Yp3","EcR","PGRP-LB","PGRP-SB1","Tsf1")
+lapply(  0:17, function(cl){
+
+  p1= pheatmap(sapply( gL, function(x) sapply(gL, function(y) (cor.cluster.change.genes(x,y,cl=cl,col="isVirgin",col_val=TRUE)) ) ),cluster_rows = F,cluster_cols = F,display_numbers = T,main = paste0("Cluster = ",cl," VI_VU "),color = pal,fontsize = 6,breaks=breaksList )
+
+  p2= pheatmap(sapply( gL, function(x) sapply(gL, function(y) (cor.cluster.change.genes(x,y,cl=cl,col="isVirgin",col_val=FALSE)) ) ),cluster_rows = F,cluster_cols = F,display_numbers = T,main = paste0("Cluster = ",cl," MI_MU "),color = pal,fontsize = 6,breaks=breaksList )
+
+
+  p3= pheatmap(sapply( gL, function(x) sapply(gL, function(y) (cor.cluster.change.genes(x,y,cl=cl,col="isInfected",col_val=FALSE)) ) ),cluster_rows = F,cluster_cols = F,display_numbers = T,main = paste0("Cluster = ",cl," VU_MU "),color = pal,fontsize = 6,breaks=breaksList )
+    
+  p4= pheatmap(sapply( gL, function(x) sapply(gL, function(y) (cor.cluster.change.genes(x,y,cl=cl,col="isInfected",col_val=TRUE)) ) ),cluster_rows = F,cluster_cols = F,display_numbers = T,main = paste0("Cluster = ",cl," VI_MI "),color = pal,fontsize = 6,breaks=breaksList )
+
+  plot_grid(p1[[4]],p2[[4]],p3[[4]],p4[[4]])
+  })
+
+```
+
+
+# Mitochondrial gene expression differences between cluster 8 and control clusters
+```{r}
+n=1000; sum( sapply(1:n, function(x) t.test( combined@meta.data$percent.mt[which(combined@meta.data$seurat_clusters==8)], sample( combined@meta.data$percent.mt[which(combined@meta.data$condition=="control")],61 ) )$p.value ) <0.01  )/n
+
+boxplot(
+  list( cnt.clus0=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==0 & combined@meta.data$condition=="control"],cnt.clus1=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==1 & combined@meta.data$condition=="control"],cnt.clus2=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==2 & combined@meta.data$condition=="control"],cnt.clus3=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==3 & combined@meta.data$condition=="control"],cnt.clus4=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==4 & combined@meta.data$condition=="control"],cnt.clus5=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==5 & combined@meta.data$condition=="control"],cnt.clus6=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==6 & combined@meta.data$condition=="control"],cnt.clus7=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==7 & combined@meta.data$condition=="control"],trt.clus8=combined@meta.data$percent.mt[combined@meta.data$seurat_clusters==8]),
+col=c(rep("gray",8),"indianred"),las=2
+  )
+
+```
+
+Heat shock genes 
+```{r}
+heat.genes= sapply( strsplit(unique(gff[grep("heat shock protein",gff$V9),V9]),";"), function(x) strsplit(x[1],"=")[[1]][2])
+
+DotPlot(object = combined, features = gsub("_","-",heat.genes[grep("[.]",heat.genes,invert = T)]),dot.scale = 4,split.by = "condition") + RotatedAxis()
+
+```
+Gametocytogenesiss
+```{r}
+gc = read.delim("C:/Users/ishaa/Desktop/gametocytogenesis.txt",header=F,stringsAsFactors = F)
+markers[which(markers$gene %in% gsub("_","-",gc$V1)),]
+
+```
+

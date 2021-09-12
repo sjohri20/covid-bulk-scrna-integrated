@@ -1,0 +1,207 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Figure 2
+```{r}
+
+plotBox = function(dat,nc_col="nCount_RNA",main="PBMCs-2.7k",plot.umap=FALSE)
+{
+  dat@meta.data$Celltypes = Idents(dat)
+  krogan = read.delim("C:/Users/ishaa/Downloads/COVID_Genes_Krogan_biorxiv2020 - Sheet1.csv",sep=",",header=T,stringsAsFactors = F)
+  dat@meta.data$kroganSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% krogan$Host.gene,]))
+  dat@meta.data$kroganSet.pc = dat@meta.data$kroganSet/dat@meta.data[,nc_col]
+  par(mar = c(3,6,2,1) + 0.1); 
+  boxplot( dat@meta.data$kroganSet.pc ~dat@meta.data$Celltypes,
+           outline=F,main=paste0(main,"_Gordon_et_al"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+  
+  jiao2020 = read.delim("C:/Users/ishaa/Downloads/COVID_Genes_Jingjiao_Li_biorxiv2020 - Sheet1.tsv",header=T)
+  dat@meta.data$jiaoSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% jiao2020$Gene.Names,]))
+  dat@meta.data$jiaoSet.pc = dat@meta.data$jiaoSet/dat@meta.data[,nc_col]
+
+    boxplot( dat@meta.data$jiaoSet.pc ~dat@meta.data$Celltypes,
+           outline=F,main=paste0(main,"_Li_et_al"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+  
+
+  dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% union(jiao2020$Gene.Names,krogan$Host.gene),]))
+  dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]
+    
+  boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+             outline=F,main=paste0(main,"_Both"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+  if(plot.umap){
+    UMAPPlot(dat)
+    FeaturePlot(dat, features = "fullSet")
+  }
+}
+
+
+dat = readRDS("C:/Users/ishaa/Downloads/pbmc3k_final.rds")
+plotBox(dat,nc_col = "nCount_RNA",main="PBMC",plot.umap = T)
+
+dat = readRDS("C:/Users/ishaa/Desktop/spleen_ts.rds")
+plotBox(dat,nc_col = "n_counts",main="Spleen")
+
+dat = readRDS("C:/Users/ishaa/Desktop/lung_ts.rds")
+plotBox(dat,nc_col = "n_counts",main="Lung")
+
+dat = readRDS("C:/Users/ishaa/Desktop/oesophagus_ts.rds")
+plotBox(dat,nc_col = "n_counts",main="Oesophagus")
+
+```
+
+
+# Figure 3
+
+```{r}
+library(MuSiC)
+library(Biobase)
+library(xbioc)
+library(RColorBrewer)
+
+bulk.data = read.delim("C:/Users/ishaa/Downloads/GSE147507_RawReadCounts_Human.tsv/GSE147507_RawReadCounts_Human.tsv")
+
+bulk.mat = as.matrix(bulk.data[,grep("Lung",colnames(bulk.data))]) 
+rownames(bulk.mat) = bulk.data[,1]
+colnames(bulk.mat) = substr(colnames(bulk.mat),10,30)
+bulk.eset = ExpressionSet(assayData = bulk.mat )
+
+breaksList = seq(0, 10, by = 1)/10
+
+plotDeconv = function(dat,bulk.eset){
+  dat@meta.data$sample = rownames(dat@meta.data)
+  dat@meta.data$Celltypes = Idents(dat)
+  dat.m = as.matrix(dat@assays$RNA@scale.data)
+  pheno.m = dat@meta.data
+
+  sc.eset = ExpressionSet(assayData = as.matrix(dat.m), phenoData = new("AnnotatedDataFrame",data=pheno.m))
+  
+  Est.prop.bulk.annot = music_prop(bulk.eset = bulk.eset, 
+                                 sc.eset = sc.eset, 
+                                 clusters = 'Celltypes', 
+                                 samples="sample",
+                                 select.ct = names(table(dat@meta.data$Celltypes)), 
+                                 verbose = T)
+pheatmap::pheatmap(Est.prop.bulk.annot$Est.prop.weighted,
+                   cluster_rows = F,
+                   cluster_cols = F,
+                   display_numbers = T,
+                   colorRampPalette(rev(brewer.pal(n = 7, name = "RdBu")))(length(breaksList)), 
+                   breaks = breaksList)
+
+}
+
+dat = readRDS("C:/Users/ishaa/Downloads/pbmc3k_final.rds")
+plotDeconv(dat,bulk.eset)
+
+dat = readRDS("C:/Users/ishaa/Desktop/lung_ts.rds")
+plotDeconv(dat,bulk.eset)
+
+dat = readRDS("C:/Users/ishaa/Desktop/spleen_ts.rds")
+plotDeconv(dat,bulk.eset)
+
+dat = readRDS("C:/Users/ishaa/Desktop/oesophagus_ts.rds")
+plotDeconv(dat,bulk.eset)
+
+```
+
+
+#Figure 4
+
+```{r}
+# Differential expression calculation for Covid 19 and healthy patients data
+
+bulk.data = read.delim("GSE147507_RawReadCounts_Human.tsv")
+
+bulk.mat = as.matrix(bulk.data[,grep("Lung",colnames(bulk.data))]) 
+rownames(bulk.mat) = bulk.data[,1]
+
+#BiocManager::install("DESeq2")
+library(DESeq2)
+cn = data.frame(sample = 1:4,condition=c("Healthy","Healthy","Covid19","Covid19"))
+rownames(cn) = colnames(bulk.mat)
+dds.covid19 = DESeqDataSetFromMatrix(countData = bulk.mat,colData=cn, ~condition)
+dds.covid19 = DESeq(dds.covid19)
+res.covid19 = results(dds.covid19)
+
+```
+
+```{r}
+
+plotBox2 = function(dat,nc_col="nCount_RNA",main="PBMCs-2.7k")
+{
+par(mar = c(3,9,2,1) + 0.1); 
+
+dat@meta.data$Celltypes = Idents(dat)
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange<0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_UPregulated"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange>0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_DOWNregulated"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+}
+
+
+dat = readRDS("C:/Users/ishaa/Downloads/pbmc3k_final.rds")
+plotBox2(dat,nc_col = "nCount_RNA",main="PBMC")
+
+dat = readRDS("C:/Users/ishaa/Desktop/spleen_ts.rds")
+plotBox2(dat,nc_col = "n_counts",main="Spleen")
+
+dat = readRDS("C:/Users/ishaa/Desktop/lung_ts.rds")
+plotBox2(dat,nc_col = "n_counts",main="Lung")
+
+dat = readRDS("C:/Users/ishaa/Desktop/oesophagus_ts.rds")
+plotBox2(dat,nc_col = "n_counts",main="Oesophagus")
+
+
+
+
+dat = readRDS("C:/Users/ishaa/Desktop/spleen_ts.rds"); nc_col="n_counts"
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange<0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_Both"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange<0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_Both"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+dat = readRDS("C:/Users/ishaa/Desktop/lung_ts.rds"); nc_col="n_counts"
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange<0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_Both"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+
+dat@meta.data$fullSet = colSums(as.matrix(dat@assays$RNA@counts[rownames(dat@assays$RNA@counts) %in% intersect( union(jiao2020$Gene.Names,krogan$Host.gene), rownames(bulk.mat[which(res.covid19$padj<0.1 & res.covid19$log2FoldChange<0),]) ),]))
+dat@meta.data$fullSet.pc = dat@meta.data$fullSet/dat@meta.data[,nc_col]; 
+boxplot( dat@meta.data$fullSet.pc ~dat@meta.data$Celltypes,
+         outline=F,main=paste0(main,"_Both"),las=2 ,horizontal = T,cex.axis=0.75,xlab="",ylab="") 
+
+
+```
+
+
+Differential expression in Aged vs Young Platelets
+
+```{r}
+raw = read.delim("3Elderly_3Young_CountsFPKM.txt",header=T)
+counts = raw[,grep("Counts",colnames(raw))]
+rownames(counts) = raw[,1]
+cd = data.frame(id=1:6, age = as.factor(rep(c("Old","Young"),each=3)) )
+rownames(cd) =colnames(counts)
+dds = DESeqDataSetFromMatrix(countData =counts, colData = cd, ~ age )
+dds = DESeq(dds,quiet = T)
+res = results(dds)
+
+```
+

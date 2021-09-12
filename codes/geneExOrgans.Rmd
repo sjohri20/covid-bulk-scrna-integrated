@@ -1,0 +1,162 @@
+---
+title: "Gene Expression in Lungs, Oesophagus, Spleen"
+output: html_notebook
+---
+
+
+```{r}
+###### Lung Dataset 1 ######
+# data downloaded from https://cells.ucsc.edu/?ds=eils-lung%2Fhbecs
+
+exp_mat = read.table(gzfile("exprMatrix.tsv.gz"), row.names = 1, stringsAsFactors = F, header = TRUE)
+rownames(exp_mat)=lapply(rownames(exp_mat),function(x){strsplit(x,split = "|", fixed = TRUE)[[1]][1]})
+cell_type = read.csv("meta.tsv", sep = "\t", row.names = 1, header = TRUE)
+
+```
+
+Loading genes in humans involved in protein-protein interaction with the covid proteins.
+```{r}
+
+jiao2020 = read.delim("COVID_Genes_Jingjiao_Li_biorxiv2020 - Sheet1.tsv",header=T)
+krogan2020 = read.delim("COVID_Genes_Krogan_biorxiv2020 - Sheet1.tsv",header=T)
+
+j.split = split(jiao2020,jiao2020$Localization)
+k.split = split(krogan2020,krogan2020$Annotation)
+
+```
+
+
+```{r}
+df = data.frame(matrix(nrow=length(colnames(exp_mat)),ncol=0))
+
+df[,"jiao2020"] = colSums(as.matrix(exp_mat[rownames(exp_mat) %in% jiao2020$Gene.Names,]))
+df[,"krogan2020"] = colSums(as.matrix(exp_mat[rownames(exp_mat) %in% krogan2020$Host.gene,]))
+df[,"n_counts"] = colSums(as.matrix(exp_mat))
+
+for(x in names(j.split))
+{
+  df[,x] = colSums(data.matrix(exp_mat[rownames(exp_mat) %in% jiao2020$Gene.Names[jiao2020$Localization==x],]))
+}
+
+for(x in names(k.split))
+{
+  
+  df[,x] = colSums(as.matrix(exp_mat[rownames(exp_mat) %in% krogan2020$Host.gene[krogan2020$Annotation==x],]))
+}
+
+```
+
+
+```{r}
+cn_exp_dat = lapply(colnames(exp_mat),function(x){substr(x,2,26)})
+rn_meta = lapply(rownames(cell_type), function(x){substr(x,1,25)})
+
+df_common = df[which(cn_exp_dat %in% rn_meta),]
+df_common[,"cellType"] = cell_type$assignedMarkers[which(rn_meta %in% cn_exp_dat)]
+```
+
+
+```{r}
+par("mar"=c(5, 9, 2, 2))
+for (x in c(colnames(df_common)[4:36]))
+{
+  boxplot(df_common[,x]/df_common[,"n_counts"] ~ df_common$cellType,outline=F,main=paste("Lung",x),las=2 ,horizontal = T,xlab="Percentage expression",ylab="",cex.axis=0.75, col="grey")
+}
+
+```
+```{r}
+library(Seurat)
+
+###### Lung set 2 ######
+# data downloaded from https://www.tissuestabilitycellatlas.org/
+
+dat.lung_ts = readRDS("lung_ts.rds")
+
+dat.lung_ts@meta.data$jiaoSet = colSums(as.matrix(dat.lung_ts@assays$RNA@counts[rownames(dat.lung_ts@assays$RNA@counts) %in% jiao2020$Gene.Names,]))
+dat.lung_ts@meta.data$kroganset = colSums(as.matrix(dat.lung_ts@assays$RNA@counts[rownames(dat.lung_ts@assays$RNA@counts) %in% krogan2020$Host.gene,]))
+
+for(x in names(j.split))
+{
+  dat.lung_ts@meta.data[,x] = colSums(as.matrix(dat.lung_ts@assays$RNA@counts[rownames(dat.lung_ts@assays$RNA@counts) %in% jiao2020$Gene.Names[jiao2020$Localization==x],]))
+}
+
+for(x in names(k.split))
+{
+  
+  dat.lung_ts@meta.data[,x] = colSums(as.matrix(dat.lung_ts@assays$RNA@counts[rownames(dat.lung_ts@assays$RNA@counts) %in% krogan2020$Host.gene[krogan2020$Annotation==x],]))
+}
+```
+
+```{r}
+Organelles = colnames(dat.lung_ts@meta.data)[12:46]
+
+par(mar=c(5, 9, 2, 2));
+for(x in Organelles)
+{
+  boxplot(dat.lung_ts@meta.data[,x]/dat.lung_ts@meta.data$n_counts ~dat.lung_ts@meta.data$Celltypes,outline=F,main=paste("Lung",x),las=2 ,horizontal = T,xlab="",ylab="",cex.axis=0.75, col="grey")
+}
+```
+```{r}
+##### Oesophagus #####
+# data downloaded from https://www.tissuestabilitycellatlas.org/
+
+dat.oeso_ts = readRDS("oesophagus_ts.rds")
+
+dat.oeso_ts@meta.data$jiaoSet = colSums(as.matrix(dat.oeso_ts@assays$RNA@counts[rownames(dat.oeso_ts@assays$RNA@counts) %in% jiao2020$Gene.Names,]))
+dat.oeso_ts@meta.data$kroganset = colSums(as.matrix(dat.oeso_ts@assays$RNA@counts[rownames(dat.oeso_ts@assays$RNA@counts) %in% krogan2020$Host.gene,]))
+
+for(x in names(j.split))
+{
+  dat.oeso_ts@meta.data[,x] = colSums(as.matrix(dat.oeso_ts@assays$RNA@counts[rownames(dat.oeso_ts@assays$RNA@counts) %in% jiao2020$Gene.Names[jiao2020$Localization==x],]))
+}
+
+for(x in names(k.split))
+{
+  
+  dat.oeso_ts@meta.data[,x] = colSums(as.matrix(dat.oeso_ts@assays$RNA@counts[rownames(dat.oeso_ts@assays$RNA@counts) %in% krogan2020$Host.gene[krogan2020$Annotation==x],]))
+}
+
+```
+
+
+```{r}
+Organelles = colnames(dat.oeso_ts@meta.data)[12:46]
+
+par(mar=c(5, 9, 2, 2));
+for(x in Organelles)
+{
+  boxplot(dat.oeso_ts@meta.data[,x]/dat.oeso_ts@meta.data$n_counts ~dat.oeso_ts@meta.data$Celltypes,outline=F,main=paste("Oesophagus",x),las=2 ,horizontal = T,xlab="",ylab="",cex.axis=0.75, col="grey")
+}
+```
+```{r}
+###### Spleen ######
+# data downloaded from https://www.tissuestabilitycellatlas.org/
+
+dat.spleen_ts = readRDS("spleen_ts.rds")
+
+dat.spleen_ts@meta.data$jiaoSet = colSums(as.matrix(dat.spleen_ts@assays$RNA@counts[rownames(dat.spleen_ts@assays$RNA@counts) %in% jiao2020$Gene.Names,]))
+dat.spleen_ts@meta.data$kroganset = colSums(as.matrix(dat.spleen_ts@assays$RNA@counts[rownames(dat.spleen_ts@assays$RNA@counts) %in% krogan2020$Host.gene,]))
+
+for(x in names(j.split))
+{
+  dat.spleen_ts@meta.data[,x] = colSums(as.matrix(dat.spleen_ts@assays$RNA@counts[rownames(dat.spleen_ts@assays$RNA@counts) %in% jiao2020$Gene.Names[jiao2020$Localization==x],]))
+}
+
+for(x in names(k.split))
+{
+  
+  dat.spleen_ts@meta.data[,x] = colSums(as.matrix(dat.spleen_ts@assays$RNA@counts[rownames(dat.spleen_ts@assays$RNA@counts) %in% krogan2020$Host.gene[krogan2020$Annotation==x],]))
+}
+```
+
+```{r}
+Organelles = colnames(dat.spleen_ts@meta.data)[12:46]
+
+par(mar=c(5, 9, 2, 2));
+for(x in Organelles)
+{
+  boxplot(dat.spleen_ts@meta.data[,x]/dat.spleen_ts@meta.data$n_counts ~dat.spleen_ts@meta.data$Celltypes,outline=F,main=paste("Spleen",x),las=2 ,horizontal = T,xlab="",ylab="",cex.axis=0.75, col="grey")
+}
+
+```
+
